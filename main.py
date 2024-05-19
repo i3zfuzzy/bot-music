@@ -1,10 +1,9 @@
 import discord
 from discord.ext import commands
 import os
-# import all of the cogs
 from dotenv import load_dotenv
 from help_cog import help_cog
-from music_cog import music_cog
+from music_cog import MusicCog
 
 load_dotenv()
 TOKEN = os.getenv('discord_token')
@@ -23,7 +22,7 @@ bot.remove_command('help')
 @bot.event
 async def on_ready():
     await bot.add_cog(help_cog(bot))
-    await bot.add_cog(music_cog(bot))
+    await bot.add_cog(MusicCog(bot))
 
 
 # start do bot
