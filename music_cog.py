@@ -89,6 +89,7 @@ class MusicCog(commands.Cog):
         # Adicionar músicas à fila
         for song in songs:
             await self.music_queue.put({"source": song["url"], "channel": voice_channel})
+        await ctx.send("Música ou playlist adicionada à fila.")
 
         # Se não estiver tocando nada, iniciar a reprodução
         if not self.is_playing:
@@ -116,9 +117,15 @@ class MusicCog(commands.Cog):
 
     @commands.command(name="queue", aliases=["q"], help="Displays the current songs in queue")
     async def queue(self, ctx):
-        if self.current_playlist:
-            queue_list = "\n".join(song['title'] for song in self.current_playlist)
-            await ctx.send(f"Lista de reprodução atual:\n{queue_list}")
+        queue_list = []
+        while not self.music_queue.empty():
+            song = await self.music_queue.get()
+            queue_list.append(song)
+            await self.music_queue.put(song)
+
+        if queue_list:
+            queue_message = "\n".join([song['source'] for song in queue_list])
+            await ctx.send(f"Lista de reprodução atual ({len(queue_list)} músicas):\n{queue_message}")
         else:
             await ctx.send("Não há músicas na lista de reprodução.")
 
@@ -137,7 +144,6 @@ class MusicCog(commands.Cog):
             self.vc = None
             self.is_playing = False
             self.is_paused = False
-            self.current_playlist = []
             await ctx.send("Bot desconectado.")
 
 
