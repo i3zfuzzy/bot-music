@@ -3,7 +3,6 @@ import asyncio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
 
-
 class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -62,9 +61,7 @@ class MusicCog(commands.Cog):
                 info = ydl.extract_info(item, download=False)
                 if 'entries' in info:
                     # Se for uma lista de reprodução, retorna todas as músicas da lista
-                    if 'webpage_url' in info:
-                        entries = info['entries']
-                        return entries
+                    return info['entries']
                 else:
                     return [info]
             except Exception:
@@ -86,17 +83,17 @@ class MusicCog(commands.Cog):
             await ctx.send("Você precisa estar conectado a um canal de voz!")
             return
 
+        if "playlist" in query.lower():
+            await ctx.send("Playlist sendo processada. A reprodução começará em breve.")
+        else:
+            await ctx.send("Música ou playlist adicionada à fila.")
+
         songs = self.search_yt(query)
 
         # Verificar se há músicas na playlist
         if not songs:
             await ctx.send("Não foi possível encontrar a música ou a playlist.")
             return
-
-        if "playlist" in query.lower():
-            await ctx.send("Playlist sendo processada. A reprodução começará em breve.")
-        else:
-            await ctx.send("Música ou playlist adicionada à fila.")
 
         # Adicionar músicas à fila assincronamente
         await self.add_songs_to_queue(ctx, songs, voice_channel)
@@ -142,12 +139,12 @@ class MusicCog(commands.Cog):
         else:
             await ctx.send("Não há músicas na lista de reprodução.")
 
-    # Limpar a fila de reprodução
     @commands.command(name="clear", aliases=["c", "bin"], help="Stops the music and clears the queue")
     async def clear(self, ctx):
         if self.vc is not None and self.vc.is_playing():
             self.vc.stop()
         self.music_queue = asyncio.Queue()
+        await ctx.send("Fila limpa")
 
     @commands.command(name="leave", help="Makes the bot leave the voice channel")
     async def leave(self, ctx):
