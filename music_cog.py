@@ -18,57 +18,58 @@ class MusicCog(commands.Cog):
         self.vc = None
 
     async def play_music(self, ctx):
-        while True:
-            # Obter a próxima música da fila
+        while not self.music_queue.empty():
             song = await self.music_queue.get()
             if song is None:
-                # Se a música for None, significa que a fila está vazia
                 self.is_playing = False
                 await self.disconnect_if_inactive(ctx)
                 return
 
-            # Conectar ao canal de voz
             if self.vc is None or not self.vc.is_connected():
-                self.vc = await song["channel"].connect()
+                try:
+                    self.vc = await song["channel"].connect()
+                except Exception as e:
+                    print(f"Erro ao conectar ao canal de voz: {e}")
+                    await ctx.send("Não foi possível conectar ao canal de voz.")
+                    self.is_playing = False
+                    return
             else:
                 await self.vc.move_to(song["channel"])
 
-            # Tocar a música
-            self.vc.play(discord.FFmpegOpusAudio(song["source"], **self.FFMPEG_OPTIONS))
+            try:
+                print(f"Tocando música: {song['source']}")
+                self.vc.play(discord.FFmpegOpusAudio(song["source"], **self.FFMPEG_OPTIONS))
+                while self.vc.is_playing() or self.is_paused:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                print(f"Erro ao tentar tocar a música: {e}")
+                await ctx.send("Erro ao tentar tocar a música.")
+                continue
 
-            # Aguardar até a música terminar de tocar
-            while self.vc.is_playing():
-                await asyncio.sleep(1)
-
-            # Tocar a próxima música da fila
-            await self.play_next(ctx)
-
-    async def play_next(self, ctx):
-        # Verificar se há mais músicas na fila
-        if not self.music_queue.empty():
-            await self.play_music(ctx)
+        await self.disconnect_if_inactive(ctx)
 
     async def add_songs_to_queue(self, ctx, songs, voice_channel):
-        # Adicionar músicas à fila
         for song in songs:
             if song is None or "url" not in song:
                 continue
             await self.music_queue.put({"source": song["url"], "channel": voice_channel})
+            print(f"Adicionando música à fila: {song['url']}")
 
-    def search_yt(self, item):
+    async def search_yt(self, item):
+        loop = asyncio.get_event_loop()
         with YoutubeDL(self.YDL_OPTIONS) as ydl:
             try:
-                info = ydl.extract_info(item, download=False)
+                info = await loop.run_in_executor(None, ydl.extract_info, item, False)
                 if 'entries' in info:
-                    # Se for uma lista de reprodução, retorna todas as músicas da lista
                     return info['entries']
                 else:
                     return [info]
-            except Exception:
+            except Exception as e:
+                print(f"Erro ao buscar no YouTube: {e}")
                 return []
 
     async def disconnect_if_inactive(self, ctx):
-        await asyncio.sleep(180)  # Espera 3 minutos (180 segundos)
+        await asyncio.sleep(180)
         if not self.is_playing and not self.is_paused and (self.vc is None or not self.vc.is_playing()):
             await self.vc.disconnect()
             self.vc = None
@@ -88,17 +89,13 @@ class MusicCog(commands.Cog):
         else:
             await ctx.send("Música ou playlist adicionada à fila.")
 
-        songs = self.search_yt(query)
-
-        # Verificar se há músicas na playlist
+        songs = await self.search_yt(query)
         if not songs:
             await ctx.send("Não foi possível encontrar a música ou a playlist.")
             return
 
-        # Adicionar músicas à fila assincronamente
         await self.add_songs_to_queue(ctx, songs, voice_channel)
 
-        # Se não estiver tocando nada, iniciar a reprodução
         if not self.is_playing:
             self.is_playing = True
             await self.play_music(ctx)
@@ -127,11 +124,11 @@ class MusicCog(commands.Cog):
         queue_list = []
         while not self.music_queue.empty():
             song = await self.music_queue.get()
-            if song not in queue_list:  # Verifica se a música já está na lista antes de adicioná-la
+            if song not in queue_list:
                 queue_list.append(song)
                 await self.music_queue.put(song)
             else:
-                await self.music_queue.put(song)  # Coloca de volta na fila para garantir que não seja perdida
+                await self.music_queue.put(song)
 
         if queue_list:
             queue_message = "\n".join([song['source'] for song in queue_list])
@@ -156,6 +153,5 @@ class MusicCog(commands.Cog):
             await ctx.send("Bot desconectado.")
 
 
-# Inicializa o cog
 def setup(bot):
     bot.add_cog(MusicCog(bot))
