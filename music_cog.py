@@ -12,7 +12,7 @@ class MusicCog(commands.Cog):
         self.is_playing = False
         self.is_paused = False
         self.music_queue = asyncio.Queue()
-        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'False', 'default_search': 'auto'}
+        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': False, 'default_search': 'auto', 'ignoreerrors': True, 'skip_download': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
                                'options': '-vn'}
 
@@ -49,6 +49,13 @@ class MusicCog(commands.Cog):
         if not self.music_queue.empty():
             await self.play_music(ctx)
 
+    async def add_songs_to_queue(self, ctx, songs, voice_channel):
+        # Adicionar músicas à fila
+        for song in songs:
+            if song is None or "url" not in song:
+                continue
+            await self.music_queue.put({"source": song["url"], "channel": voice_channel})
+
     def search_yt(self, item):
         with YoutubeDL(self.YDL_OPTIONS) as ydl:
             try:
@@ -56,10 +63,8 @@ class MusicCog(commands.Cog):
                 if 'entries' in info:
                     # Se for uma lista de reprodução, retorna todas as músicas da lista
                     if 'webpage_url' in info:
-                        return info['entries']
-                    # Se for uma pesquisa, retorna apenas o primeiro resultado
-                    else:
-                        return [info['entries'][0]]
+                        entries = info['entries']
+                        return entries
                 else:
                     return [info]
             except Exception:
@@ -82,14 +87,19 @@ class MusicCog(commands.Cog):
             return
 
         songs = self.search_yt(query)
+
+        # Verificar se há músicas na playlist
         if not songs:
             await ctx.send("Não foi possível encontrar a música ou a playlist.")
             return
 
-        # Adicionar músicas à fila
-        for song in songs:
-            await self.music_queue.put({"source": song["url"], "channel": voice_channel})
-        await ctx.send("Música ou playlist adicionada à fila.")
+        if "playlist" in query.lower():
+            await ctx.send("Playlist sendo processada. A reprodução começará em breve.")
+        else:
+            await ctx.send("Música ou playlist adicionada à fila.")
+
+        # Adicionar músicas à fila assincronamente
+        await self.add_songs_to_queue(ctx, songs, voice_channel)
 
         # Se não estiver tocando nada, iniciar a reprodução
         if not self.is_playing:
@@ -120,8 +130,11 @@ class MusicCog(commands.Cog):
         queue_list = []
         while not self.music_queue.empty():
             song = await self.music_queue.get()
-            queue_list.append(song)
-            await self.music_queue.put(song)
+            if song not in queue_list:  # Verifica se a música já está na lista antes de adicioná-la
+                queue_list.append(song)
+                await self.music_queue.put(song)
+            else:
+                await self.music_queue.put(song)  # Coloca de volta na fila para garantir que não seja perdida
 
         if queue_list:
             queue_message = "\n".join([song['source'] for song in queue_list])
@@ -135,7 +148,6 @@ class MusicCog(commands.Cog):
         if self.vc is not None and self.vc.is_playing():
             self.vc.stop()
         self.music_queue = asyncio.Queue()
-        await ctx.send("Fila limpa")
 
     @commands.command(name="leave", help="Makes the bot leave the voice channel")
     async def leave(self, ctx):
