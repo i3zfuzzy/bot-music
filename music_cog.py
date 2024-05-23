@@ -13,8 +13,10 @@ class MusicCog(commands.Cog):
         self.is_paused = False
         self.music_queue = []
         self.current_song = None
-        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': False, 'default_search': 'auto', 'ignoreerrors': True, 'skip_download': True}
-        self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': False, 'default_search': 'auto', 'ignoreerrors': True,
+                            'skip_download': True}
+        self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                               'options': '-vn'}
 
         self.vc = None
 
@@ -70,18 +72,37 @@ class MusicCog(commands.Cog):
             self.music_queue.append({"source": song["url"], "title": song["title"], "channel": voice_channel})
             print(f"Adicionando música à fila: {song['title']}")
 
-    async def search_yt(self, item):
+    async def search_yt(self, item, ctx=None):
         loop = asyncio.get_event_loop()
         with YoutubeDL(self.YDL_OPTIONS) as ydl:
             try:
                 info = await loop.run_in_executor(None, ydl.extract_info, item, False)
                 if 'entries' in info:
-                    return [{'url': entry['url'], 'title': entry['title']} for entry in info['entries']]
-                else:
+                    total_songs = len(info['entries'])
+                    songs = []
+                    next_update = 30
+                    for index, entry in enumerate(info['entries']):
+                        if entry and 'url' in entry and 'title' in entry:
+                            songs.append({'url': entry['url'], 'title': entry['title']})
+                            if ctx:
+                                percentage = ((index + 1) / total_songs) * 100
+                                if percentage >= next_update:
+                                    await ctx.send(f"Processando playlist: {self.progress_bar(percentage)} {percentage:.2f}% concluído.")
+                                    next_update += 30
+                    await ctx.send(f"Processando playlist: {self.progress_bar(100)} 100% concluído.")
+                    return songs
+                elif 'url' in info and 'title' in info:
                     return [{'url': info['url'], 'title': info['title']}]
+                else:
+                    return []
             except Exception as e:
                 print(f"Erro ao buscar no YouTube: {e}")
                 return []
+
+    def progress_bar(self, percentage):
+        blocks = int(percentage // 10)
+        progress = '█' * blocks + '░' * (10 - blocks)
+        return f"[{progress}]"
 
     async def disconnect_if_inactive(self, ctx):
         await asyncio.sleep(180)
@@ -104,7 +125,7 @@ class MusicCog(commands.Cog):
         else:
             await ctx.send("Música ou playlist adicionada à fila.")
 
-        songs = await self.search_yt(query)
+        songs = await self.search_yt(query, ctx)
         if not songs:
             await ctx.send("Não foi possível encontrar a música ou a playlist.")
             return
