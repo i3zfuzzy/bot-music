@@ -12,6 +12,7 @@ class MusicCog(commands.Cog):
         self.is_playing = False
         self.is_paused = False
         self.music_queue = []
+        self.current_song = None
         self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': False, 'default_search': 'auto', 'ignoreerrors': True, 'skip_download': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 
@@ -25,6 +26,8 @@ class MusicCog(commands.Cog):
                 await self.disconnect_if_inactive(ctx)
                 return
 
+            self.current_song = song  # Atualizar a música atual
+
             if self.vc is None or not self.vc.is_connected():
                 try:
                     self.vc = await song["channel"].connect()
@@ -37,10 +40,11 @@ class MusicCog(commands.Cog):
                 await self.vc.move_to(song["channel"])
 
             try:
-                print(f"Tocando música: {song['source']}")
+                print(f"Tocando música: {song['title']}")
                 source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(song["source"], **self.FFMPEG_OPTIONS))
                 self.vc.play(source, after=lambda e: self.bot.loop.create_task(self.song_finished(ctx, e)))
                 self.is_playing = True
+                await ctx.send(f"Tocando agora: {song['title']}")
                 while self.vc.is_playing() or self.is_paused:
                     await asyncio.sleep(1)
             except Exception as e:
@@ -63,8 +67,8 @@ class MusicCog(commands.Cog):
         for song in songs:
             if song is None or "url" not in song:
                 continue
-            self.music_queue.append({"source": song["url"], "channel": voice_channel})
-            print(f"Adicionando música à fila: {song['url']}")
+            self.music_queue.append({"source": song["url"], "title": song["title"], "channel": voice_channel})
+            print(f"Adicionando música à fila: {song['title']}")
 
     async def search_yt(self, item):
         loop = asyncio.get_event_loop()
@@ -72,9 +76,9 @@ class MusicCog(commands.Cog):
             try:
                 info = await loop.run_in_executor(None, ydl.extract_info, item, False)
                 if 'entries' in info:
-                    return info['entries']
+                    return [{'url': entry['url'], 'title': entry['title']} for entry in info['entries']]
                 else:
-                    return [info]
+                    return [{'url': info['url'], 'title': info['title']}]
             except Exception as e:
                 print(f"Erro ao buscar no YouTube: {e}")
                 return []
@@ -114,6 +118,7 @@ class MusicCog(commands.Cog):
     @commands.command(name="skip", help="Skips the current song being played")
     async def skip(self, ctx):
         if self.vc is not None and self.vc.is_playing():
+            await ctx.send(f"Pulado: {self.current_song['title']}")
             self.vc.stop()
 
     @commands.command(name="pause", help="Pauses the current song being played")
@@ -133,11 +138,11 @@ class MusicCog(commands.Cog):
     @commands.command(name="queue", aliases=["q"], help="Displays the current songs in queue")
     async def queue(self, ctx):
         if self.music_queue:
-            queue_message = "\n".join([song['source'] for song in self.music_queue])
+            queue_message = "\n".join([song['title'] for song in self.music_queue])
             # Dividir a mensagem em partes menores se ultrapassar o limite de 2000 caracteres
             messages = textwrap.wrap(queue_message, 2000, replace_whitespace=False)
             for msg in messages:
-                await ctx.send(f"Lista de reprodução atual ({len(self.music_queue)} músicas):\n{msg}")
+                await ctx.send(f"Lista de reprodução atual:\n{msg}")
         else:
             await ctx.send("Não há músicas na lista de reprodução.")
 
