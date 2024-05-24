@@ -2,7 +2,7 @@ import discord
 import asyncio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
-import textwrap
+
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
@@ -13,8 +13,8 @@ class MusicCog(commands.Cog):
         self.is_paused = False
         self.music_queue = []
         self.current_song = None
-        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': False, 'default_search': 'auto', 'ignoreerrors': True,
-                            'skip_download': True}
+        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True, 'default_search': 'auto', 'ignoreerrors': True}
+        self.PLAYLIST_YDL_OPTIONS = {'extract_flat': True, 'default_search': 'ytsearch', 'ignoreerrors': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
                                'options': '-vn'}
 
@@ -42,8 +42,9 @@ class MusicCog(commands.Cog):
                 await self.vc.move_to(song["channel"])
 
             try:
-                print(f"Tocando música: {song['title']}")
-                source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(song["source"], **self.FFMPEG_OPTIONS))
+                # Extrair a URL completa no momento de tocar a música
+                source_url = await self.extract_url(song['url'])
+                source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(source_url, **self.FFMPEG_OPTIONS))
                 self.vc.play(source, after=lambda e: self.bot.loop.create_task(self.song_finished(ctx, e)))
                 self.is_playing = True
                 await ctx.send(f"Tocando agora: {song['title']}")
@@ -51,10 +52,16 @@ class MusicCog(commands.Cog):
                     await asyncio.sleep(1)
             except Exception as e:
                 print(f"Erro ao tentar tocar a música: {e}")
-                await ctx.send("Erro ao tentar tocar a música.")
-                continue
+                continue  # Removemos a linha que enviava a mensagem de erro
 
+        self.is_playing = False
         await self.disconnect_if_inactive(ctx)
+
+    async def extract_url(self, url):
+        loop = asyncio.get_event_loop()
+        with YoutubeDL(self.YDL_OPTIONS) as ydl:
+            info = await loop.run_in_executor(None, ydl.extract_info, url)
+            return info['url']
 
     async def song_finished(self, ctx, error):
         if error:
@@ -69,27 +76,18 @@ class MusicCog(commands.Cog):
         for song in songs:
             if song is None or "url" not in song:
                 continue
-            self.music_queue.append({"source": song["url"], "title": song["title"], "channel": voice_channel})
+            self.music_queue.append({"url": song["url"], "title": song["title"], "channel": voice_channel})
             print(f"Adicionando música à fila: {song['title']}")
 
     async def search_yt(self, item, ctx=None):
         loop = asyncio.get_event_loop()
         with YoutubeDL(self.YDL_OPTIONS) as ydl:
             try:
-                info = await loop.run_in_executor(None, ydl.extract_info, item, False)
+                info = await loop.run_in_executor(None, lambda: ydl.extract_info(f"ytsearch:{item}", download=False))
                 if 'entries' in info:
-                    total_songs = len(info['entries'])
-                    songs = []
-                    next_update = 30
-                    for index, entry in enumerate(info['entries']):
-                        if entry and 'url' in entry and 'title' in entry:
-                            songs.append({'url': entry['url'], 'title': entry['title']})
-                            if ctx:
-                                percentage = ((index + 1) / total_songs) * 100
-                                if percentage >= next_update:
-                                    await ctx.send(f"Processando playlist: {self.progress_bar(percentage)} {percentage:.2f}% concluído.")
-                                    next_update += 30
-                    await ctx.send(f"Processando playlist: {self.progress_bar(100)} 100% concluído.")
+                    entries = info['entries']
+                    songs = [{'url': entry['url'], 'title': entry['title']} for entry in entries if
+                             'url' in entry and 'title' in entry]
                     return songs
                 elif 'url' in info and 'title' in info:
                     return [{'url': info['url'], 'title': info['title']}]
@@ -99,10 +97,21 @@ class MusicCog(commands.Cog):
                 print(f"Erro ao buscar no YouTube: {e}")
                 return []
 
-    def progress_bar(self, percentage):
-        blocks = int(percentage // 10)
-        progress = '█' * blocks + '░' * (10 - blocks)
-        return f"[{progress}]"
+    async def search_playlist(self, item, ctx=None):
+        loop = asyncio.get_event_loop()
+        with YoutubeDL(self.PLAYLIST_YDL_OPTIONS) as ydl:
+            try:
+                info = await loop.run_in_executor(None, lambda: ydl.extract_info(item, download=False))
+                if 'entries' in info:
+                    entries = info['entries']
+                    songs = [{'url': entry['url'], 'title': entry['title']} for entry in entries if
+                             'url' in entry and 'title' in entry]
+                    return songs
+                else:
+                    return []
+            except Exception as e:
+                print(f"Erro ao buscar no YouTube: {e}")
+                return []
 
     async def disconnect_if_inactive(self, ctx):
         await asyncio.sleep(180)
@@ -120,12 +129,13 @@ class MusicCog(commands.Cog):
             await ctx.send("Você precisa estar conectado a um canal de voz!")
             return
 
-        if "playlist" in query.lower():
-            await ctx.send("Playlist sendo processada. A reprodução começará em breve.")
-        else:
-            await ctx.send("Música ou playlist adicionada à fila.")
+        await ctx.send("Música ou playlist adicionada à fila.")
 
-        songs = await self.search_yt(query, ctx)
+        if "playlist" in query.lower():
+            songs = await self.search_playlist(query, ctx)
+        else:
+            songs = await self.search_yt(query, ctx)
+
         if not songs:
             await ctx.send("Não foi possível encontrar a música ou a playlist.")
             return
@@ -139,42 +149,24 @@ class MusicCog(commands.Cog):
     @commands.command(name="skip", help="Skips the current song being played")
     async def skip(self, ctx):
         if self.vc is not None and self.vc.is_playing():
-            await ctx.send(f"Pulado: {self.current_song['title']}")
+            self.current_song = None  # Resetar a música atual
             self.vc.stop()
+            if not self.music_queue:
+                await ctx.send("Não há mais músicas na fila.")
+                await self.disconnect_if_inactive(ctx)
 
     @commands.command(name="pause", help="Pauses the current song being played")
     async def pause(self, ctx):
         if self.vc and self.vc.is_playing():
             self.is_paused = True
-            self.vc.pause()
-            await ctx.send("Música pausada.")
 
     @commands.command(name="resume", help="Resumes the paused song")
     async def resume(self, ctx):
         if self.vc and self.is_paused:
             self.is_paused = False
             self.vc.resume()
-            await ctx.send("Música retomada.")
 
-    @commands.command(name="queue", aliases=["q"], help="Displays the current songs in queue")
-    async def queue(self, ctx):
-        if self.music_queue:
-            queue_message = "\n".join([song['title'] for song in self.music_queue])
-            # Dividir a mensagem em partes menores se ultrapassar o limite de 2000 caracteres
-            messages = textwrap.wrap(queue_message, 2000, replace_whitespace=False)
-            for msg in messages:
-                await ctx.send(f"Lista de reprodução atual:\n{msg}")
-        else:
-            await ctx.send("Não há músicas na lista de reprodução.")
-
-    @commands.command(name="clear", aliases=["c", "bin"], help="Stops the music and clears the queue")
-    async def clear(self, ctx):
-        if self.vc is not None and self.vc.is_playing():
-            self.vc.stop()
-        self.music_queue = []
-        await ctx.send("Fila limpa")
-
-    @commands.command(name="leave", help="Makes the bot leave the voice channel")
+    @commands.command(name="leave", help="disconnect bot")
     async def leave(self, ctx):
         if self.vc and self.vc.is_connected():
             await self.vc.disconnect()
