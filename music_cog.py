@@ -15,6 +15,7 @@ class MusicCog(commands.Cog):
         self.current_song = None
         self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True, 'default_search': 'auto', 'ignoreerrors': True}
         self.PLAYLIST_YDL_OPTIONS = {'extract_flat': True, 'default_search': 'auto', 'ignoreerrors': True}
+        self.MIX_YDL_OPTIONS = {'format': 'bestaudio', 'extract_flat': True, 'default_search': 'auto', 'ignoreerrors': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
                                'options': '-vn'}
 
@@ -80,6 +81,13 @@ class MusicCog(commands.Cog):
             await self.disconnect_if_inactive(ctx)
 
     async def add_songs_to_queue(self, ctx, songs, voice_channel):
+        if self.vc is None or not self.vc.is_connected():
+            try:
+                self.vc = await voice_channel.connect()
+            except Exception as e:
+                print(f"Erro ao conectar ao canal de voz: {e}")
+                await ctx.send("Não foi possível conectar ao canal de voz.")
+                return
         for song in songs:
             if song is None or "url" not in song:
                 continue
@@ -125,8 +133,25 @@ class MusicCog(commands.Cog):
                 print(f"Erro ao buscar no YouTube: {e}")
                 return []
 
+    async def search_mix(self, item, ctx=None):
+        loop = asyncio.get_event_loop()
+        with YoutubeDL(self.MIX_YDL_OPTIONS) as ydl:
+            try:
+                info = await loop.run_in_executor(None, lambda: ydl.extract_info(item, download=False))
+                if 'entries' in info:
+                    entries = info['entries']
+                    songs = []
+                    for entry in entries:
+                        if 'url' in entry and 'title' in entry:
+                            songs.append({'url': entry['url'], 'title': entry['title']})
+                    return songs
+                else:
+                    return []
+            except Exception as e:
+                print(f"Erro ao buscar no YouTube: {e}")
+                return []
+
     async def disconnect_if_inactive(self, ctx):
-        await asyncio.sleep(180)
         if not self.is_playing and not self.is_paused and self.vc and self.vc.is_connected():
             await self.vc.disconnect()
             self.vc = None
@@ -145,6 +170,8 @@ class MusicCog(commands.Cog):
 
         if "playlist" in query.lower():
             songs = await self.search_playlist(query, ctx)
+        elif "mix" in query.lower() or "start_radio" in query.lower():
+            songs = await self.search_mix(query, ctx)
         else:
             songs = await self.search_yt(query, ctx)
 
@@ -187,22 +214,29 @@ class MusicCog(commands.Cog):
 
     @commands.command(name="clear", aliases=["c", "bin"], help="Stops the music and clears the queue")
     async def clear(self, ctx):
-        if self.vc is not None and self.vc.is_playing():
+        if self.vc is not None and self.vc.is_connected():
             self.vc.stop()
+            await self.vc.disconnect()
+            self.vc = None
         self.music_queue = []
         self.is_playing = False
         await ctx.send("Fila limpa.")
 
-    @commands.command(name="leave", help="Makes the bot leave the voice channel")
+    @commands.command(name="leave", aliases=["disconnect", "dc"], help="Clears the queue and leaves the voice channel")
     async def leave(self, ctx):
-        if self.vc and self.vc.is_connected():
+        if self.vc is not None and self.vc.is_connected():
+            if self.vc.is_playing() or self.vc.is_paused():
+                self.vc.stop()
             await self.vc.disconnect()
             self.vc = None
+            self.music_queue = []
             self.is_playing = False
-            self.is_paused = False
-            self.music_queue = []  # Limpa a fila ao sair
-            await ctx.send("Bot desconectado.")
-
+            self.is_paused = False  # Reinicializa o estado de pausa
+            self.current_song = None  # Reinicializa a música atual
+            await ctx.send("Desconectado do canal de voz.")
+        else:
+            await ctx.send("Não estou conectado a nenhum canal de voz.")
 
 def setup(bot):
     bot.add_cog(MusicCog(bot))
+
