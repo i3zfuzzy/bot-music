@@ -27,10 +27,16 @@ async def invite(ctx):
     """
     Retorna o link de convite do bot.
     """
-    # Adicione os escopos e permissões conforme necessário
-    scopes = ['bot']
-    permissions = discord.Permissions(send_messages=True)
-    url = discord.utils.oauth_url(bot.user.id, permissions=permissions, scopes=scopes)
+    permissions = discord.Permissions(
+        send_messages=True,
+        manage_channels=True,
+        manage_messages=True,
+        connect=True,
+        speak=True,
+        use_external_emojis=True,
+        use_application_commands=True
+    )
+    url = discord.utils.oauth_url(bot.user.id, permissions=permissions, scopes=['bot', 'applications.commands'])
     await ctx.send(f"Use este link para adicionar o bot ao seu servidor: {url}")
 
 # Start do bot
