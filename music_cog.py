@@ -13,11 +13,34 @@ class MusicCog(commands.Cog):
         self.is_paused = False
         self.music_queue = []
         self.current_song = None
-        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True, 'default_search': 'auto', 'ignoreerrors': True}
-        self.PLAYLIST_YDL_OPTIONS = {'extract_flat': True, 'default_search': 'auto', 'ignoreerrors': True}
-        self.MIX_YDL_OPTIONS = {'format': 'bestaudio', 'extract_flat': True, 'default_search': 'auto', 'ignoreerrors': True}
-        self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                               'options': '-vn'}
+
+
+        self.YDL_OPTIONS = {
+            'format': 'bestaudio',
+            'noplaylist': True,
+            'default_search': 'auto',
+            'ignoreerrors': True,
+            'geo_bypass': True,
+            'nocheckcertificate': True,
+            'no_warnings': True,
+            'http_chunk_size': 10485760  # 10MB
+
+        }
+        self.PLAYLIST_YDL_OPTIONS = {
+            'extract_flat': True,
+            'default_search': 'invidious',
+            'ignoreerrors': True
+        }
+        self.MIX_YDL_OPTIONS = {
+            'format': 'bestaudio',
+            'extract_flat': True,
+            'default_search': 'invidious',
+            'ignoreerrors': True
+        }
+        self.FFMPEG_OPTIONS = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn'
+        }
 
         self.vc = None
         self.play_lock = asyncio.Lock()  # Lock para controlar a execução de play_music
@@ -214,29 +237,25 @@ class MusicCog(commands.Cog):
 
     @commands.command(name="clear", aliases=["c", "bin"], help="Stops the music and clears the queue")
     async def clear(self, ctx):
-        if self.vc is not None and self.vc.is_connected():
+        if self.vc and self.is_playing:
             self.vc.stop()
-            await self.vc.disconnect()
-            self.vc = None
         self.music_queue = []
         self.is_playing = False
-        await ctx.send("Fila limpa.")
+        await ctx.send("Fila de músicas limpa.")
 
-    @commands.command(name="leave", aliases=["disconnect", "dc"], help="Clears the queue and leaves the voice channel")
+    @commands.command(name="leave", aliases=["disconnect", "l", "d"], help="Clears the queue and leaves the voice channel")
     async def leave(self, ctx):
-        if self.vc is not None and self.vc.is_connected():
-            if self.vc.is_playing() or self.vc.is_paused():
-                self.vc.stop()
+        self.music_queue = []
+        self.is_playing = False
+        if self.vc:
             await self.vc.disconnect()
-            self.vc = None
-            self.music_queue = []
-            self.is_playing = False
-            self.is_paused = False  # Reinicializa o estado de pausa
-            self.current_song = None  # Reinicializa a música atual
-            await ctx.send("Desconectado do canal de voz.")
-        else:
-            await ctx.send("Não estou conectado a nenhum canal de voz.")
+        await ctx.send("Desconectado do canal de voz.")
 
+    @commands.command(name="nowplaying", aliases=["np", "current"], help="Displays the current song being played")
+    async def nowplaying(self, ctx):
+        if self.current_song:
+            await ctx.send(f"Tocando agora: {self.current_song['title']}")
+        else:
+            await ctx.send("Não há músicas tocando no momento.")
 def setup(bot):
     bot.add_cog(MusicCog(bot))
-
