@@ -3,17 +3,14 @@ import asyncio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
 
-
 class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-        # Variáveis de controle
         self.is_playing = False
         self.is_paused = False
         self.music_queue = []
         self.current_song = None
-
 
         self.YDL_OPTIONS = {
             'format': 'bestaudio',
@@ -24,7 +21,6 @@ class MusicCog(commands.Cog):
             'nocheckcertificate': True,
             'no_warnings': True,
             'http_chunk_size': 10485760  # 10MB
-
         }
         self.PLAYLIST_YDL_OPTIONS = {
             'extract_flat': True,
@@ -43,15 +39,14 @@ class MusicCog(commands.Cog):
         }
 
         self.vc = None
-        self.play_lock = asyncio.Lock()  # Lock para controlar a execução de play_music
+        self.play_lock = asyncio.Lock()
 
     async def play_music(self, ctx):
-        async with self.play_lock:  # Garantir que apenas uma execução de play_music aconteça por vez
+        async with self.play_lock:
             while self.music_queue:
                 self.is_playing = True
                 song = self.music_queue.pop(0)
-
-                self.current_song = song  # Atualizar a música atual
+                self.current_song = song
 
                 if self.vc is None or not self.vc.is_connected():
                     try:
@@ -65,11 +60,9 @@ class MusicCog(commands.Cog):
                     await self.vc.move_to(song["channel"])
 
                 try:
-                    # Extrair a URL completa no momento de tocar a música
                     source_url = await self.extract_url(song['url'])
                     source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(source_url, **self.FFMPEG_OPTIONS))
 
-                    # Parar qualquer áudio atual antes de tocar o novo
                     if self.vc.is_playing() or self.vc.is_paused():
                         self.vc.stop()
 
@@ -127,8 +120,7 @@ class MusicCog(commands.Cog):
                 info = await loop.run_in_executor(None, lambda: ydl.extract_info(f"ytsearch:{item}", download=False))
                 if 'entries' in info:
                     entries = info['entries']
-                    songs = [{'url': entry['url'], 'title': entry['title']} for entry in entries if
-                             'url' in entry and 'title' in entry]
+                    songs = [{'url': entry['url'], 'title': entry['title']} for entry in entries if 'url' in entry and 'title' in entry]
                     return songs
                 elif 'url' in info and 'title' in info:
                     return [{'url': info['url'], 'title': info['title']}]
@@ -145,10 +137,7 @@ class MusicCog(commands.Cog):
                 info = await loop.run_in_executor(None, lambda: ydl.extract_info(item, download=False))
                 if 'entries' in info:
                     entries = info['entries']
-                    songs = []
-                    for entry in entries:
-                        if 'url' in entry and 'title' in entry:
-                            songs.append({'url': entry['url'], 'title': entry['title']})
+                    songs = [{'url': entry['url'], 'title': entry['title']} for entry in entries if 'url' in entry and 'title' in entry]
                     return songs
                 else:
                     return []
@@ -163,10 +152,7 @@ class MusicCog(commands.Cog):
                 info = await loop.run_in_executor(None, lambda: ydl.extract_info(item, download=False))
                 if 'entries' in info:
                     entries = info['entries']
-                    songs = []
-                    for entry in entries:
-                        if 'url' in entry and 'title' in entry:
-                            songs.append({'url': entry['url'], 'title': entry['title']})
+                    songs = [{'url': entry['url'], 'title': entry['title']} for entry in entries if 'url' in entry and 'title' in entry]
                     return songs
                 else:
                     return []
@@ -243,7 +229,8 @@ class MusicCog(commands.Cog):
         self.is_playing = False
         await ctx.send("Fila de músicas limpa.")
 
-    @commands.command(name="leave", aliases=["disconnect", "l", "d"], help="Clears the queue and leaves the voice channel")
+    @commands.command(name="leave", aliases=["disconnect", "l", "d"],
+                      help="Clears the queue and leaves the voice channel")
     async def leave(self, ctx):
         self.music_queue = []
         self.is_playing = False
@@ -257,5 +244,7 @@ class MusicCog(commands.Cog):
             await ctx.send(f"Tocando agora: {self.current_song['title']}")
         else:
             await ctx.send("Não há músicas tocando no momento.")
+
 def setup(bot):
     bot.add_cog(MusicCog(bot))
+

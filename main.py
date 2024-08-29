@@ -39,5 +39,5 @@ async def invite(ctx):
     url = discord.utils.oauth_url(bot.user.id, permissions=permissions, scopes=['bot', 'applications.commands'])
     await ctx.send(f"Use este link para adicionar o bot ao seu servidor: {url}")
 
-# Start do bot
+# Start do bott
 bot.run(TOKEN)
