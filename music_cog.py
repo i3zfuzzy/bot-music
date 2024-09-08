@@ -2,6 +2,7 @@ import discord
 import asyncio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
+import requests  # Biblioteca para baixar o arquivo PLS
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
@@ -40,6 +41,43 @@ class MusicCog(commands.Cog):
 
         self.vc = None
         self.play_lock = asyncio.Lock()
+
+    # Função para tocar rádio
+    @commands.command(name="playradio", help="Toca uma rádio ao vivo.")
+    async def playradio(self, ctx):
+        pls_url = "http://playerservices.streamtheworld.com/pls/MAG_AAC.pls"  # URL do arquivo PLS
+        response = requests.get(pls_url)
+
+        # Extrair o URL do stream do arquivo PLS
+        radio_url = None
+        for line in response.text.splitlines():
+            if line.startswith("File1="):
+                radio_url = line.split("=")[1]
+                break
+
+        if not radio_url:
+            await ctx.send("Não foi possível encontrar o link de áudio.")
+            return
+
+        voice_channel = ctx.author.voice.channel
+        if voice_channel is None:
+            await ctx.send("Você precisa estar conectado a um canal de voz!")
+            return
+
+        if self.vc is None or not self.vc.is_connected():
+            try:
+                self.vc = await voice_channel.connect()
+            except Exception as e:
+                print(f"Erro ao conectar ao canal de voz: {e}")
+                await ctx.send("Não foi possível conectar ao canal de voz.")
+                return
+
+        source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(radio_url, **self.FFMPEG_OPTIONS))
+        if self.vc.is_playing() or self.vc.is_paused():
+            self.vc.stop()
+
+        self.vc.play(source)
+        await ctx.send(f"Tocando rádio: {radio_url}")
 
     async def play_music(self, ctx):
         async with self.play_lock:
@@ -213,38 +251,15 @@ class MusicCog(commands.Cog):
             self.vc.resume()
             await ctx.send("Música retomada.")
 
-    @commands.command(name="queue", aliases=["q"], help="Displays the current songs in queue")
-    async def queue(self, ctx):
-        if self.music_queue:
-            queue_message = "\n".join([song['title'] for song in self.music_queue])
-            await ctx.send(f"Lista de reprodução atual:\n{queue_message}")
-        else:
-            await ctx.send("Não há músicas na lista de reprodução.")
-
-    @commands.command(name="clear", aliases=["c", "bin"], help="Stops the music and clears the queue")
-    async def clear(self, ctx):
-        if self.vc and self.is_playing:
+    @commands.command(name="stop", help="Stops the current song and clears the queue")
+    async def stop(self, ctx):
+        if self.vc and (self.vc.is_playing() or self.is_paused):
+            self.music_queue = []
+            self.is_playing = False
+            self.is_paused = False
             self.vc.stop()
-        self.music_queue = []
-        self.is_playing = False
-        await ctx.send("Fila de músicas limpa.")
-
-    @commands.command(name="leave", aliases=["disconnect", "l", "d"],
-                      help="Clears the queue and leaves the voice channel")
-    async def leave(self, ctx):
-        self.music_queue = []
-        self.is_playing = False
-        if self.vc:
-            await self.vc.disconnect()
-        await ctx.send("Desconectado do canal de voz.")
-
-    @commands.command(name="nowplaying", aliases=["np", "current"], help="Displays the current song being played")
-    async def nowplaying(self, ctx):
-        if self.current_song:
-            await ctx.send(f"Tocando agora: {self.current_song['title']}")
-        else:
-            await ctx.send("Não há músicas tocando no momento.")
+            await self.disconnect_if_inactive(ctx)
+            await ctx.send("Música parada e fila limpa.")
 
 def setup(bot):
     bot.add_cog(MusicCog(bot))
-
