@@ -81,7 +81,7 @@ class MusicCog(commands.Cog):
         self.YDL_OPTIONS = {
             'format': 'bestaudio',
             'noplaylist': False,
-            'default_search': 'auto',
+            'default_search': 'ytsearch',
             'ignoreerrors': True,
             'geo_bypass': True,
             'nocheckcertificate': True,
@@ -214,12 +214,25 @@ class MusicCog(commands.Cog):
 
     async def search_youtube(self, query):
         loop = asyncio.get_event_loop()
-        with YoutubeDL(self.PLAYLIST_YDL_OPTIONS) as ydl:
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
-            if "entries" in info:
-                # Handle playlist case
-                return [{"url": entry["url"], "title": entry["title"]} for entry in info["entries"]]
-            return [{"url": info["url"], "title": info["title"]}]
+        with YoutubeDL(self.YDL_OPTIONS) as ydl:
+            try:
+                # Instead of using invidious, just use the normal YouTube search
+                info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
+
+                # Check if it's a playlist and extract entries
+                if "entries" in info:
+                    return [{"url": entry["url"], "title": entry.get("title", "Sem título")} for entry in
+                            info["entries"] if "url" in entry]
+
+                # Check if the response has a URL and title
+                if "url" in info:
+                    return [{"url": info["url"], "title": info.get("title", "Sem título")}]
+
+                # If no URL is found, return empty
+                return []
+            except Exception as e:
+                print(f"Error searching YouTube: {e}")
+                return []
 
     async def disconnect_if_inactive(self, ctx):
         if self.vc is not None and not self.vc.is_playing() and not self.is_paused:
