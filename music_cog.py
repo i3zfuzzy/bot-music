@@ -126,6 +126,20 @@ class MusicCog(commands.Cog):
         view = RadioView(self.vc)
         await ctx.send("Selecione uma rádio para tocar:", view=view)
 
+        # Inicia a verificação de inatividade em uma tarefa separada
+        self.bot.loop.create_task(self.check_voice_channel_activity(ctx))
+
+    async def check_voice_channel_activity(self, ctx):
+        while True:
+            await asyncio.sleep(5)  # Verifica a cada 5 segundos
+            if self.vc is not None and self.vc.is_connected():
+                # Verifica se o bot é o único membro no canal
+                if len(self.vc.channel.members) == 1:  # Verifica se só tem o bot no canal
+                    await self.vc.disconnect()
+                    self.vc = None
+                    await ctx.send("Desconectado do canal de voz devido à ausência de ouvintes.")
+                    return
+
     async def play_music(self, ctx):
         async with self.play_lock:
             while self.music_queue:
@@ -159,6 +173,9 @@ class MusicCog(commands.Cog):
                     self.vc.play(source, after=after_playing)
                     await ctx.send(f"Tocando agora: {song['title']}")
 
+                    # Inicia a verificação de inatividade em uma tarefa separada
+                    self.bot.loop.create_task(self.check_voice_channel_activity(ctx))
+
                     while self.vc.is_playing() or self.is_paused:
                         await asyncio.sleep(1)
                 except Exception as e:
@@ -167,6 +184,17 @@ class MusicCog(commands.Cog):
 
             self.is_playing = False
             await self.disconnect_if_inactive(ctx)
+
+    async def check_voice_channel_activity(self, ctx):
+        while True:
+            await asyncio.sleep(5)  # Verifica a cada 5 segundos
+            if self.vc is not None and self.vc.is_connected():
+                # Verifica se o bot é o único membro no canal
+                if len(self.vc.channel.members) == 1:  # Verifica se só tem o bot no canal
+                    await self.vc.disconnect()
+                    self.vc = None
+                    await ctx.send("Desconectado do canal de voz devido à ausência de ouvintes.")
+                    return
 
     async def extract_url(self, url):
         loop = asyncio.get_event_loop()
@@ -267,6 +295,9 @@ class MusicCog(commands.Cog):
             await self.vc.disconnect()
             self.vc = None
             await ctx.send("Parando a música e desconectando do canal de voz.")
+
+
+
 
 
 async def setup(bot):
