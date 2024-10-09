@@ -11,6 +11,7 @@ class RadioSelect(discord.ui.Select):
             discord.SelectOption(label="Mundo Livre FM", value="mundo_livre"),
             discord.SelectOption(label="Rádio Mix", value="radio_mix"),
             discord.SelectOption(label="Jovem Pan", value="jovem_pan"),
+            discord.SelectOption(label="Metropolitana FM", value="metropolitana"),  # Nova rádio adicionada
         ]
         super().__init__(placeholder="Escolha uma rádio...", options=options)
 
@@ -19,7 +20,8 @@ class RadioSelect(discord.ui.Select):
             "magica": "http://playerservices.streamtheworld.com/pls/MAG_AAC.pls",
             "mundo_livre": "https://playerservices.streamtheworld.com/api/livestream-redirect/MUNDOLIVRE_CWBAAC_64.aac?dist=site",
             "radio_mix": "https://26593.live.streamtheworld.com/MIXFM_SAOPAULOAAC.aac?dist=mix-web-player-radio-ao-vivo&354510.1708523699",
-            "jovem_pan": "https://stream-166.zeno.fm/c45wbq2us3buv?zt=eyJhbGciOiJIUzI1NiJ9.eyJzdHJlYW0iOiJjNDV3YnEydXMzYnV2IiwiaG9zdCI6InN0cmVhbS0xNjYuemVuby5mbSIsInJ0dGwiOjUsImp0aSI6Im1mMGFfZUlnVFhxZWJaY0IxU2thUEEiLCJpYXQiOjE3Mjc5NjIxMjQsImV4cCI6MTcyNzk2MjE4NH0.G92OFE0J-ZbxnVqsLwuutcSeERLvLcoyGlffMXFityM"
+            "jovem_pan": "https://stream-166.zeno.fm/c45wbq2us3buv?zt=eyJhbGciOiJIUzI1NiJ9.eyJzdHJlYW0iOiJjNDV3YnEydXMzYnV2IiwiaG9zdCI6InN0cmVhbS0xNjYuemVuby5mbSIsInJ0dGwiOjUsImp0aSI6Im1mMGFfZUlnVFhxZWJaY0IxU2thUEEiLCJpYXQiOjE3Mjc5NjIxMjQsImV4cCI6MTcyNzk2MjE4NH0.G92OFE0J-ZbxnVqsLwuutcSeERLvLcoyGlffMXFityM",
+            "metropolitana": "https://ice.fabricahost.com.br/metropolitana985sp",  # URL da nova rádio
         }
 
         radio_url = radio_choices[self.values[0]]
@@ -47,6 +49,16 @@ class RadioSelect(discord.ui.Select):
 
         self.view.vc.play(source)
         await interaction.response.send_message(f"Tocando: {self.values[0]}")
+
+    def get_radio_url(self, pls_url):
+        # Faz o download do arquivo PLS
+        response = requests.get(pls_url)
+        if response.status_code == 200:
+            # Extrai a URL do fluxo de áudio
+            for line in response.text.splitlines():
+                if line.startswith("File1="):
+                    return line.split("=", 1)[1].strip()
+        return None
 
     def get_radio_url(self, pls_url):
         # Faz o download do arquivo PLS
@@ -101,6 +113,7 @@ class MusicCog(commands.Cog):
         }
         self.FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'executable': '/usr/bin/ffmpeg',
             'options': '-vn'
         }
 
