@@ -2,285 +2,243 @@ import discord
 import asyncio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
-import requests  # Biblioteca para baixar o arquivo PLS
-
-class RadioSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Rádio Mágica", value="magica"),
-            discord.SelectOption(label="Mundo Livre FM", value="mundo_livre"),
-            discord.SelectOption(label="Rádio Mix", value="radio_mix"),
-            discord.SelectOption(label="Jovem Pan", value="jovem_pan"),
-            discord.SelectOption(label="Metropolitana FM", value="metropolitana"),  # Nova rádio adicionada
-        ]
-        super().__init__(placeholder="Escolha uma rádio...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        radio_choices = {
-            "magica": "http://playerservices.streamtheworld.com/pls/MAG_AAC.pls",
-            "mundo_livre": "https://playerservices.streamtheworld.com/api/livestream-redirect/MUNDOLIVRE_CWBAAC_64.aac?dist=site",
-            "radio_mix": "https://26593.live.streamtheworld.com/MIXFM_SAOPAULOAAC.aac?dist=mix-web-player-radio-ao-vivo&354510.1708523699",
-            "jovem_pan": "https://stream-166.zeno.fm/c45wbq2us3buv?zt=eyJhbGciOiJIUzI1NiJ9.eyJzdHJlYW0iOiJjNDV3YnEydXMzYnV2IiwiaG9zdCI6InN0cmVhbS0xNjYuemVuby5mbSIsInJ0dGwiOjUsImp0aSI6Im1mMGFfZUlnVFhxZWJaY0IxU2thUEEiLCJpYXQiOjE3Mjc5NjIxMjQsImV4cCI6MTcyNzk2MjE4NH0.G92OFE0J-ZbxnVqsLwuutcSeERLvLcoyGlffMXFityM",
-            "metropolitana": "https://ice.fabricahost.com.br/metropolitana985sp",  # URL da nova rádio
-        }
-
-        radio_url = radio_choices[self.values[0]]
-
-        # Verifica se é a Rádio Mágica e busca a URL de áudio do arquivo PLS
-        if self.values[0] == "magica":
-            radio_url = self.get_radio_url(radio_url)
-
-        voice_channel = interaction.user.voice.channel
-        if voice_channel is None:
-            await interaction.response.send_message("Você precisa estar conectado a um canal de voz!")
-            return
-
-        if self.view.vc is None or not self.view.vc.is_connected():
-            try:
-                self.view.vc = await voice_channel.connect()
-            except Exception as e:
-                print(f"Erro ao conectar ao canal de voz: {e}")
-                await interaction.response.send_message("Não foi possível conectar ao canal de voz.")
-                return
-
-        source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(radio_url, **self.view.FFMPEG_OPTIONS))
-        if self.view.vc.is_playing() or self.view.vc.is_paused():
-            self.view.vc.stop()
-
-        self.view.vc.play(source)
-        await interaction.response.send_message(f"Tocando: {self.values[0]}")
-
-    def get_radio_url(self, pls_url):
-        # Faz o download do arquivo PLS
-        response = requests.get(pls_url)
-        if response.status_code == 200:
-            # Extrai a URL do fluxo de áudio
-            for line in response.text.splitlines():
-                if line.startswith("File1="):
-                    return line.split("=", 1)[1].strip()
-        return None
-
-    def get_radio_url(self, pls_url):
-        # Faz o download do arquivo PLS
-        response = requests.get(pls_url)
-        if response.status_code == 200:
-            # Extrai a URL do fluxo de áudio
-            for line in response.text.splitlines():
-                if line.startswith("File1="):
-                    return line.split("=", 1)[1].strip()
-        return None
+from discord.ui import View, Button
 
 
-class RadioView(discord.ui.View):
-    def __init__(self, vc):
-        super().__init__()
-        self.vc = vc
-        self.FFMPEG_OPTIONS = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'
-        }
-        self.add_item(RadioSelect())
+class MusicControlView(View):
+    def __init__(self, music_cog, ctx):
+        super().__init__(timeout=180)
+        self.music_cog = music_cog
+        self.ctx = ctx
+
+    @discord.ui.button(label="⏮️ Previous", style=discord.ButtonStyle.primary)
+    async def previous_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await self.music_cog.previous(interaction)
+
+    @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.primary)
+    async def skip_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await self.music_cog.skip(interaction)
 
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.manual_action = False
+        self.music_queue = []  # Lista de músicas (dicionários com url e título)
+        self.current_index = 0
         self.is_playing = False
         self.is_paused = False
-        self.music_queue = []
-        self.current_song = None
+        self.vc = None
 
         self.YDL_OPTIONS = {
-            'format': 'bestaudio',
-            'noplaylist': False,
-            'default_search': 'ytsearch',
+            'format': 'bestaudio/best',
+            'quiet': True,
             'ignoreerrors': True,
             'geo_bypass': True,
             'nocheckcertificate': True,
-            'no_warnings': True,
-            'http_chunk_size': 10485760  # 10MB
-        }
-        self.PLAYLIST_YDL_OPTIONS = {
             'extract_flat': True,
-            'default_search': 'invidious',
-            'ignoreerrors': True
+            'default_search': 'auto',
+            'source_address': '0.0.0.0'
         }
-        self.MIX_YDL_OPTIONS = {
-            'format': 'bestaudio',
-            'extract_flat': True,
-            'default_search': 'invidious',
-            'ignoreerrors': True
-        }
+
         self.FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'executable': '/usr/bin/ffmpeg',
             'options': '-vn'
         }
 
-        self.vc = None
-        self.play_lock = asyncio.Lock()
-
-    # Função para tocar rádio ao vivo
-    @commands.command(name="playradio", help="Toca uma rádio ao vivo.")
-    async def playradio(self, ctx):
-        voice_channel = ctx.author.voice.channel
-        if voice_channel is None:
-            await ctx.send("Você precisa estar conectado a um canal de voz!")
-            return
-
-        if self.vc is None or not self.vc.is_connected():
+    async def extract_stream_url(self, url):
+        loop = asyncio.get_event_loop()
+        ydl_opts = self.YDL_OPTIONS.copy()
+        ydl_opts['extract_flat'] = False
+        with YoutubeDL(ydl_opts) as ydl:
             try:
-                self.vc = await voice_channel.connect()
+                info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+                if info is None:
+                    return None
+                if 'url' in info:
+                    return info['url']
+                elif 'formats' in info:
+                    for f in info['formats']:
+                        if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+                            return f['url']
+                return None
             except Exception as e:
-                print(f"Erro ao conectar ao canal de voz: {e}")
-                await ctx.send("Não foi possível conectar ao canal de voz.")
-                return
+                print(f"Erro ao extrair URL do stream: {e}")
+                return None
 
-        view = RadioView(self.vc)
-        await ctx.send("Selecione uma rádio para tocar:", view=view)
-
-        # Inicia a verificação de inatividade em uma tarefa separada
-        self.bot.loop.create_task(self.check_voice_channel_activity(ctx))
-
-    async def check_voice_channel_activity(self, ctx):
-        while True:
-            await asyncio.sleep(5)  # Verifica a cada 5 segundos
-            if self.vc is not None and self.vc.is_connected():
-                # Verifica se o bot é o único membro no canal
-                if len(self.vc.channel.members) == 1:  # Verifica se só tem o bot no canal
-                    await self.vc.disconnect()
-                    self.vc = None
-                    await ctx.send("Desconectado do canal de voz devido à ausência de ouvintes.")
-                    return
+    def get_ctx(self, ctx_or_interaction):
+        return ctx_or_interaction
 
     async def play_music(self, ctx):
-        async with self.play_lock:
-            while self.music_queue:
-                self.is_playing = True
-                song = self.music_queue.pop(0)
-                self.current_song = song
-
-                if self.vc is None or not self.vc.is_connected():
-                    try:
-                        self.vc = await song["channel"].connect()
-                    except Exception as e:
-                        print(f"Erro ao conectar ao canal de voz: {e}")
-                        await ctx.send("Não foi possível conectar ao canal de voz.")
-                        self.is_playing = False
-                        return
-                else:
-                    await self.vc.move_to(song["channel"])
-
-                try:
-                    source_url = await self.extract_url(song['url'])
-                    source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(source_url, **self.FFMPEG_OPTIONS))
-
-                    if self.vc.is_playing() or self.vc.is_paused():
-                        self.vc.stop()
-
-                    def after_playing(error):
-                        if error:
-                            print(f"Player error: {error}")
-                        self.bot.loop.create_task(self.song_finished(ctx))
-
-                    self.vc.play(source, after=after_playing)
-                    await ctx.send(f"Tocando agora: {song['title']}")
-
-                    # Inicia a verificação de inatividade em uma tarefa separada
-                    self.bot.loop.create_task(self.check_voice_channel_activity(ctx))
-
-                    while self.vc.is_playing() or self.is_paused:
-                        await asyncio.sleep(1)
-                except Exception as e:
-                    print(f"Erro ao tentar tocar a música: {e}")
-                    continue
-
+        if not self.music_queue or self.current_index >= len(self.music_queue):
             self.is_playing = False
             await self.disconnect_if_inactive(ctx)
-
-    async def check_voice_channel_activity(self, ctx):
-        while True:
-            await asyncio.sleep(5)  # Verifica a cada 5 segundos
-            if self.vc is not None and self.vc.is_connected():
-                # Verifica se o bot é o único membro no canal
-                if len(self.vc.channel.members) == 1:  # Verifica se só tem o bot no canal
-                    await self.vc.disconnect()
-                    self.vc = None
-                    await ctx.send("Desconectado do canal de voz devido à ausência de ouvintes.")
-                    return
-
-    async def extract_url(self, url):
-        loop = asyncio.get_event_loop()
-        with YoutubeDL(self.YDL_OPTIONS) as ydl:
-            info = await loop.run_in_executor(None, ydl.extract_info, url)
-            return info['url']
-
-    async def song_finished(self, ctx):
-        if self.music_queue:
-            await self.play_music(ctx)
-        else:
-            self.is_playing = False
-            await self.disconnect_if_inactive(ctx)
-
-    async def add_songs_to_queue(self, ctx, songs, voice_channel):
-        if self.vc is None or not self.vc.is_connected():
-            try:
-                self.vc = await voice_channel.connect()
-            except Exception as e:
-                print(f"Erro ao conectar ao canal de voz: {e}")
-                await ctx.send("Não foi possível conectar ao canal de voz.")
-                return
-        for song in songs:
-            if song is None or "url" not in song:
-                continue
-            self.music_queue.append({"url": song["url"], "title": song["title"], "channel": voice_channel})
-            print(f"Adicionando música à fila: {song['title']}")
-        if not self.is_playing:
-            self.is_playing = True
-            self.bot.loop.create_task(self.play_music(ctx))
-
-    # Comandos de música (play, skip, pause, etc.)
-    @commands.command(name="play", aliases=["p", "playing"], help="Plays a selected song or playlist from YouTube")
-    async def play(self, ctx, *args):
-        query = " ".join(args)
-
-        voice_channel = ctx.author.voice.channel
-        if voice_channel is None:
-            await ctx.send("Você precisa estar conectado a um canal de voz!")
             return
 
-        await ctx.send("Música ou playlist adicionada à fila.")
-        songs = await self.search_youtube(query)
-        await self.add_songs_to_queue(ctx, songs, voice_channel)
+        if self.vc is not None and self.vc.is_playing():
+            self.manual_action = True
+            self.vc.stop()
+
+        self.is_playing = True
+        song = self.music_queue[self.current_index]
+        stream_url = await self.extract_stream_url(song["url"])
+
+        if stream_url:
+            source = discord.FFmpegPCMAudio(stream_url, **self.FFMPEG_OPTIONS)
+
+            def after_playing(error):
+                coro = self.after_song(ctx, error)
+                fut = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
+                try:
+                    fut.result()
+                except Exception as e:
+                    if "Already playing audio" not in str(e):
+                        print(f"Erro no after_playing: {e}")
+
+            self.vc.play(source, after=after_playing)
+
+            message = f"🎶 Tocando agora: {song['title']}"
+
+            if isinstance(ctx, discord.Interaction):
+                await ctx.followup.send(message, view=MusicControlView(self, ctx))
+            else:
+                await ctx.send(message, view=MusicControlView(self, ctx))
+        else:
+            if isinstance(ctx, discord.Interaction):
+                await ctx.followup.send("Erro ao obter a URL da música.")
+            else:
+                await ctx.send("Erro ao obter a URL da música.")
+            await self.next_track(ctx)
+
+
+    async def after_song(self, ctx, error):
+        if error:
+            if "Already playing audio" not in str(error):
+                print(f"Erro ao tocar música: {error}")
+
+        if self.manual_action:
+            self.manual_action = False
+            return  # Não executa próximo se foi manual (skip ou previous)
+
+        await self.next_track(ctx)
+
+    async def next_track(self, ctx):
+        if self.current_index + 1 >= len(self.music_queue):
+            await ctx.send("🏁 Fim da playlist.")
+            await self.disconnect_if_inactive(ctx)
+            self.music_queue.clear()
+            self.current_index = 0
+            self.is_playing = False
+        else:
+            self.current_index += 1
+            await self.play_music(ctx)
+
+    async def previous_track(self, ctx):
+        if self.current_index == 0:
+            await ctx.send("⛔ Já está na primeira música da fila.")
+        else:
+            self.current_index -= 1
+            await self.play_music(ctx)
+
+    @commands.command(name="play", aliases=["p", "playing"], help="Toca uma música ou playlist do YouTube")
+    async def play(self, ctx, *, query: str):
+        if ctx.author.voice is None:
+            await ctx.send("Você precisa estar em um canal de voz para tocar música!")
+            return
+
+        if ("youtube.com/watch" in query or "youtu.be/" in query) and "list=" in query:
+            await ctx.send(
+                "⚠️ Parece que você forneceu o link de um **vídeo dentro de uma playlist**, "
+                "e não a URL da playlist completa.\n\n"
+                "Por favor, abra a playlist no YouTube e copie a URL no formato:\n"
+                "`https://www.youtube.com/playlist?list=XXXXXXXXXXXX`\n"
+                "Assim o bot poderá carregar a playlist corretamente. ✅"
+            )
+            return
+
+        voice_channel = ctx.author.voice.channel
+        if self.vc is None or not self.vc.is_connected():
+            self.vc = await voice_channel.connect()
+        elif self.vc.channel != voice_channel:
+            await ctx.send("O bot já está conectado a outro canal de voz!")
+            return
+
+        results = await self.search_youtube(query)
+        if results is None:
+            await ctx.send("Não foi possível encontrar a música ou playlist.")
+            return
+
+        self.music_queue = results
+        self.current_index = 0
+
+        await ctx.send(
+            f"✅ Playlist/músicas carregadas. Total: {len(results)}",)
+
+        if not self.is_playing:
+            await self.play_music(ctx)
 
     async def search_youtube(self, query):
         loop = asyncio.get_event_loop()
         with YoutubeDL(self.YDL_OPTIONS) as ydl:
             try:
-                # Instead of using invidious, just use the normal YouTube search
                 info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
+                songs = []
 
-                # Check if it's a playlist and extract entries
-                if "entries" in info:
-                    return [{"url": entry["url"], "title": entry.get("title", "Sem título")} for entry in
-                            info["entries"] if "url" in entry]
+                if 'entries' in info:
+                    for entry in info['entries']:
+                        if entry is None:
+                            continue
+                        video_id = entry.get('id')
+                        if video_id is None:
+                            continue
+                        url = f"https://www.youtube.com/watch?v={video_id}"
+                        songs.append({
+                            "url": url,
+                            "title": entry.get("title", "Sem título")
+                        })
+                    return songs if songs else None
 
-                # Check if the response has a URL and title
-                if "url" in info:
-                    return [{"url": info["url"], "title": info.get("title", "Sem título")}]
+                else:
+                    video_id = info.get('id')
+                    url = f"https://www.youtube.com/watch?v={video_id}"
+                    return [{
+                        "url": url,
+                        "title": info.get("title", "Sem título")
+                    }]
 
-                # If no URL is found, return empty
-                return []
             except Exception as e:
-                print(f"Error searching YouTube: {e}")
-                return []
+                print(f"Erro ao buscar no YouTube: {e}")
+                return None
 
     async def disconnect_if_inactive(self, ctx):
         if self.vc is not None and not self.vc.is_playing() and not self.is_paused:
-            await asyncio.sleep(300)  # Aguarda 5 minutos de inatividade
+            await asyncio.sleep(300)
             if self.vc is not None and not self.vc.is_playing() and not self.is_paused:
                 await self.vc.disconnect()
                 self.vc = None
+
+    @commands.command(name="skip", help="Pula para a próxima música")
+    async def skip(self, ctx):
+        if not self.is_playing or self.vc is None:
+            if isinstance(ctx, discord.Interaction):
+                await ctx.followup.send("Nenhuma música está tocando no momento.", ephemeral=True)
+            else:
+                await ctx.send("Nenhuma música está tocando no momento.")
+            return
+
+        await self.next_track(ctx)
+
+    @commands.command(name="previous", aliases=["prev"], help="Volta para a música anterior")
+    async def previous(self, ctx):
+        if not self.music_queue:
+            if isinstance(ctx, discord.Interaction):
+                await ctx.followup.send("Não há músicas na fila.", ephemeral=True)
+            else:
+                await ctx.send("Não há músicas na fila.")
+            return
+        await self.previous_track(ctx)
 
     @commands.command(name="pause", help="Pausa a música atual")
     async def pause(self, ctx):
@@ -289,28 +247,27 @@ class MusicCog(commands.Cog):
             self.is_paused = True
             await ctx.send("Música pausada.")
 
-    @commands.command(name="resume", help="Continua a música atual")
+    @commands.command(name="resume", help="Retoma a música pausada")
     async def resume(self, ctx):
         if self.vc is not None and self.vc.is_paused():
             self.vc.resume()
             self.is_paused = False
             await ctx.send("Música retomada.")
 
-    @commands.command(name="skip", help="Pula a música atual")
-    async def skip(self, ctx):
-        if self.vc is not None and self.vc.is_playing():
-            self.vc.stop()
-            await ctx.send("Música pulada.")
-
     @commands.command(name="stop", help="Para a música e desconecta do canal de voz")
     async def stop(self, ctx):
+        self.music_queue.clear()
+        self.is_playing = False
+        self.is_paused = False
+        self.current_index = 0
         if self.vc is not None:
-            await self.vc.disconnect()
+            if self.vc.is_playing() or self.vc.is_paused():
+                self.vc.stop()
+            await self.vc.disconnect(force=True)
             self.vc = None
-            await ctx.send("Parando a música e desconectando do canal de voz.")
-
-
-
+            await ctx.send("Música parada, fila limpa e bot desconectado.")
+        else:
+            await ctx.send("O bot não está conectado a um canal de voz.")
 
 
 async def setup(bot):

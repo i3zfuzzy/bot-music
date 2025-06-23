@@ -1,8 +1,8 @@
 import discord
 from discord.ext import commands
 import os
+import time
 from dotenv import load_dotenv
-from help_cog import help_cog
 from music_cog import MusicCog
 
 load_dotenv()
@@ -19,8 +19,11 @@ bot.remove_command('help')
 # Registra a classe com o bot
 @bot.event
 async def on_ready():
+    start = time.time()
+    print("Bot iniciando...")
     await bot.add_cog(help_cog(bot))
     await bot.add_cog(MusicCog(bot))
+    print(f"Bot pronto em {time.time() - start:.2f} segundos")
 
 @bot.command()
 async def invite(ctx):
@@ -39,5 +42,5 @@ async def invite(ctx):
     url = discord.utils.oauth_url(bot.user.id, permissions=permissions, scopes=['bot', 'applications.commands'])
     await ctx.send(f"Use este link para adicionar o bot ao seu servidor: {url}")
 
-# Start do bott
+# Start do bot
 bot.run(TOKEN)
