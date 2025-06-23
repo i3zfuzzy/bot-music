@@ -148,6 +148,7 @@ class MusicCog(commands.Cog):
             await ctx.send("Você precisa estar em um canal de voz para tocar música!")
             return
 
+        # Evita passar vídeo dentro de playlist diretamente
         if ("youtube.com/watch" in query or "youtu.be/" in query) and "list=" in query:
             await ctx.send(
                 "⚠️ Parece que você forneceu o link de um **vídeo dentro de uma playlist**, "
@@ -170,11 +171,15 @@ class MusicCog(commands.Cog):
             await ctx.send("Não foi possível encontrar a música ou playlist.")
             return
 
-        self.music_queue = results
-        self.current_index = 0
-
-        await ctx.send(
-            f"✅ Playlist/músicas carregadas. Total: {len(results)}",)
+        if len(results) > 1:
+            # Se for playlist, substitui a fila atual
+            self.music_queue = results
+            self.current_index = 0
+            await ctx.send(f"✅ Playlist/músicas carregadas. Total: {len(results)}")
+        else:
+            # Música individual: adiciona à fila sem apagar as anteriores
+            self.music_queue.append(results[0])
+            await ctx.send(f"✅ Música adicionada: {results[0]['title']}")
 
         if not self.is_playing:
             await self.play_music(ctx)
@@ -183,9 +188,16 @@ class MusicCog(commands.Cog):
         loop = asyncio.get_event_loop()
         with YoutubeDL(self.YDL_OPTIONS) as ydl:
             try:
-                info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
-                songs = []
+                # Detecta se é playlist pelo parâmetro 'list=' na URL ou query
+                is_playlist = "list=" in query
 
+                ydl_opts = self.YDL_OPTIONS.copy()
+                ydl_opts['extract_flat'] = is_playlist  # só usa flat se for playlist
+
+                # Extrai info com as opções corretas
+                info = await loop.run_in_executor(None, lambda: YoutubeDL(ydl_opts).extract_info(query, download=False))
+
+                songs = []
                 if 'entries' in info:
                     for entry in info['entries']:
                         if entry is None:
@@ -199,7 +211,6 @@ class MusicCog(commands.Cog):
                             "title": entry.get("title", "Sem título")
                         })
                     return songs if songs else None
-
                 else:
                     video_id = info.get('id')
                     url = f"https://www.youtube.com/watch?v={video_id}"
